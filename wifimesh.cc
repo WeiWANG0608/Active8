@@ -1,6 +1,6 @@
-/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
+/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
- * Copyright (c) 2008,2009 IITP RAS
+ * Copyright (c) 2009 The Boeing Company
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -15,168 +15,186 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
- * Author: Kirill Andreev <andreev@iitp.ru>
- *
- *
- * By default this script creates m_xSize * m_ySize square grid topology with
- * IEEE802.11s stack installed at each node with peering management
- * and HWMP protocol.
- * The side of the square cell is defined by m_step parameter.
- * When topology is created, UDP ping is installed to opposite corners
- * by diagonals. packet size of the UDP ping and interval between two
- * successive packets is configurable.
- * 
- *  m_xSize * step
- *  |<--------->|
- *   step
- *  |<--->|
- *  * --- * --- * <---Ping sink  _
- *  | \   |   / |                ^
- *  |   \ | /   |                |
- *  * --- * --- * m_ySize * step |
- *  |   / | \   |                |
- *  | /   |   \ |                |
- *  * --- * --- *                _
- *  ^ Ping source
- *
- *  See also MeshTest::Configure to read more about configurable
- *  parameters.
  */
 
+// 
+// This script configures two nodes on an 802.11b physical layer, with
+// 802.11b NICs in adhoc mode, and by default, sends one packet of 1000 
+// (application) bytes to the other node.  The physical layer is configured
+// to receive at a fixed RSS (regardless of the distance and transmit
+// power); therefore, changing position of the nodes has no effect. 
+//
+// There are a number of command-line options available to control
+// the default behavior.  The list of available command-line options
+// can be listed with the following command:
+// ./waf --run "wifi-simple-adhoc --help"
+//
+// For instance, for this configuration, the physical layer will
+// stop successfully receiving packets when rss drops below -97 dBm.
+// To see this effect, try running:
+//
+// ./waf --run "wifi-simple-adhoc --rss=-97 --numPackets=20"
+// ./waf --run "wifi-simple-adhoc --rss=-98 --numPackets=20"
+// ./waf --run "wifi-simple-adhoc --rss=-99 --numPackets=20"
+//
+// Note that all ns-3 attributes (not just the ones exposed in the below
+// script) can be changed at command line; see the documentation.
+//
+// This script can also be helpful to put the Wifi layer into verbose
+// logging mode; this command will turn on all wifi logging:
+// 
+// ./waf --run "wifi-simple-adhoc --verbose=1"
+//
+// When you are done, you will notice two pcap trace files in your directory.
+// If you have tcpdump installed, you can try this:
+//
+// tcpdump -r wifi-simple-adhoc-0-0.pcap -nn -tt
+//
 
 #include "ns3/core-module.h"
-#include "ns3/internet-module.h"
 #include "ns3/network-module.h"
-#include "ns3/applications-module.h"
-#include "ns3/wifi-module.h"
-#include "ns3/mesh-module.h"
 #include "ns3/mobility-module.h"
+#include "ns3/config-store-module.h"
+#include "ns3/wifi-module.h"
+#include "ns3/internet-module.h"
+#include "ns3/mesh-module.h"
+#include "ns3/on-off-helper.h"
+#include "ns3/applications-module.h"
 #include "ns3/mesh-helper.h"
 #include "ns3/netanim-module.h"
-
-#include "ns3/flow-monitor-module.h"
-#include "ns3/flow-monitor-helper.h"
-#include "ns3/itu-r-1411-los-propagation-loss-model.h"
-#include "ns3/ocb-wifi-mac.h"
-#include "ns3/wifi-80211p-helper.h"
-#include "ns3/wave-mac-helper.h"
-#include "ns3/config-store-module.h"
-#include "ns3/integer.h"
-#include "ns3/wave-bsm-helper.h"
-#include "ns3/wave-helper.h"
-#include "ns3/gnuplot.h"
-
+#include "ns3/dsdv-module.h"
 
 #include <iostream>
 #include <sstream>
 #include <fstream>
-
+#include <vector>
 #include <string>
-#include <cassert>
-
 
 using namespace ns3;
 
-NS_LOG_COMPONENT_DEFINE ("TestMeshScript");
+NS_LOG_COMPONENT_DEFINE ("WifiSimpleAdhoc");
 
-class MeshTest
-{
-public:
-  /// Init test
-  MeshTest ();
-  /// Configure test from command line arguments
-  void Configure (int argc, char ** argv);
-  /// Run test
-  int Run ();
-private:
-  
-  int       m_xSize;
-  int       m_ySize;
-  double    m_step;
-  double    m_randomStart;
-  double    m_totalTime;
-  double    m_packetInterval;
-  uint16_t  m_packetSize;
-  uint32_t  m_nIfaces;
-  bool      m_chan;
-  bool      m_pcap;
-  std::string m_stack;
-  std::string m_root;
-  /// List of network nodes
-  NodeContainer nodes;
-  /// List of all mesh point devices
-  NetDeviceContainer meshDevices;
-  //Addresses of interfaces:
-  Ipv4InterfaceContainer interfaces;
-  // MeshHelper. Report is not static methods
-  MeshHelper mesh;
-private:
-  /// Create nodes and setup their mobility
-  void CreateNodes ();
-  /// Install internet m_stack on nodes
-  void InstallInternetStack ();
-  /// Install applications
-  void InstallApplication ();
-  /// Print mesh devices diagnostics
-  void Report ();
+
+struct txrec {
+  Time sts;
+  uint64_t pktUid;
 };
-MeshTest::MeshTest () :
 
-  m_xSize (3), //3
-  m_ySize (4), //3
-  m_step (20.0), //100
-  m_randomStart (0.1),
-  m_totalTime (30), //100
-  m_packetInterval (5.0), //0.1
-  m_packetSize (1024),
-  m_nIfaces (2),
-  m_chan (true),
-  m_pcap (false),
-  m_stack ("ns3::Dot11sStack"),
-  m_root ("ff:ff:ff:ff:ff:ff")
+
+
+std::vector<txrec> tx_list;
+
+uint32_t m_recvBytes=0;
+Time totalDelay;
+uint32_t throughput;
+
+void ReceivePacket (Ptr<Socket> socket)
 {
+  Ptr<Packet> pk;
+  uint64_t pk_uid; 
+  while ((pk = socket->Recv ()))
+    {
+      
+      NS_LOG_UNCOND ("Received one packet!");      
+      m_recvBytes += pk->GetSize();
+      std::cout<< m_recvBytes << " bytes received." << std::endl;
+      pk_uid = pk->GetUid();
+      std::cout<< "The uid is: "<< pk_uid << std::endl;
+    }
+
+   Time latency;
+   Time FirstTx;
+   Time LastTx;
+
+   for(uint16_t i = 0; i < tx_list.size(); i++ ) {
+     if(tx_list.at(i).pktUid==pk_uid) { 
+          latency =  Simulator::Now()-tx_list.at(i).sts;           
+          std::cout<<"The packet:"<< pk_uid << " latency is "<< 
+          latency.GetMicroSeconds() <<" us." <<std::endl;
+          totalDelay += latency;
+          std::cout<<"Total delay is "<< totalDelay.GetMicroSeconds()<<" us."  <<std::endl;
+          FirstTx = tx_list.at(0).sts;
+          LastTx = tx_list.at(tx_list.size()-1).sts;
+          tx_list.erase(tx_list.begin()+i);
+          break;
+      }
+    }//for
+   std::cout<<"Average delay is "<< (totalDelay.GetMicroSeconds()/100) <<" us."  <<std::endl;
+   Time LastRx = LastTx + latency;
+   throughput =  m_recvBytes * 8.0*1000000/( (LastRx.GetMicroSeconds() - FirstTx.GetMicroSeconds())*1024);
+   std::cout<<"Throughput is "<< throughput <<" Kbps."  <<std::endl;
 }
-void
-MeshTest::Configure (int argc, char *argv[])
+ 
+
+static void GenerateTraffic (Ptr<Socket> socket, uint32_t pktSize, 
+                             uint32_t pktCount, Time pktInterval )
 {
+  if (pktCount > 0)
+    {
+      Ptr<Packet> pk = Create<Packet>(pktSize);
+      struct txrec t = {Simulator::Now(),pk->GetUid()};
+      tx_list.push_back(t);
+      socket->Send (pk);
+      Simulator::Schedule (pktInterval, &GenerateTraffic, 
+                           socket, pktSize,pktCount-1, pktInterval);
+    }
+  else
+    {
+      socket->Close ();
+    }
+  
+
+}
+
+
+
+
+
+
+
+int main (int argc, char *argv[])
+{
+  
+  std::string phyMode ("DsssRate1Mbps");
+  double     rss = -80;  // -dBm
+  uint32_t   packetSize = 1000; // bytes
+  uint32_t   numPackets = 100;
+  double     interval=1; // seconds
+  uint16_t   n_nodes = 10;
+
+//  double     mean = 10;
+//  double     bound = 0.0;
+  uint32_t   m_nIfaces =1;
+  bool       m_chan = true;
+  double     m_randomStart =0.1;
+  std::string m_stack ="ns3::Dot11sStack";
+  std::string m_root ="ff:ff:ff:ff:ff:ff";
+
   CommandLine cmd;
-  cmd.AddValue ("x_size", "Number of nodes in row a grid. [6]", m_xSize);
-  cmd.AddValue ("y_size", "Number of rows in a grid. [6]", m_ySize);
-  cmd.AddValue ("step",   "Size of edge in our grid, meters. [100 m]", m_step);
-  /*
-   * As soon as starting node means that it sends a beacon,
-   * simultaneous start is not good.
-   */
-  cmd.AddValue ("start",  "Maximum random start delay, seconds. [0.1 s]", m_randomStart);
-  cmd.AddValue ("time",  "Simulation time, seconds [50 s]", m_totalTime);
-  cmd.AddValue ("packet-interval",  "Interval between packets in UDP ping, seconds [0.001 s]", m_packetInterval);
-  cmd.AddValue ("packet-size",  "Size of packets in UDP ping", m_packetSize);
-  cmd.AddValue ("interfaces", "Number of radio interfaces used by each mesh point. [1]", m_nIfaces);
-  cmd.AddValue ("channels",   "Use different frequency channels for different interfaces. [0]", m_chan);
-  cmd.AddValue ("pcap",   "Enable PCAP traces on interfaces. [0]", m_pcap);
-  cmd.AddValue ("stack",  "Type of protocol stack. ns3::Dot11sStack by default", m_stack);
-  cmd.AddValue ("root", "Mac address of root mesh point in HWMP", m_root);
-
+  cmd.AddValue ("phyMode", "Wifi Phy mode", phyMode);
+  cmd.AddValue ("rss", "received signal strength", rss);
+  cmd.AddValue ("packetSize", "size of application packet sent", packetSize);
+  cmd.AddValue ("numPackets", "number of packets generated", numPackets);
+  cmd.AddValue ("interval", "interval (seconds) between packets", interval);
   cmd.Parse (argc, argv);
-  NS_LOG_DEBUG ("Grid:" << m_xSize << "*" << m_ySize);
-  NS_LOG_DEBUG ("Simulation time: " << m_totalTime << " s");
-}
-void
-MeshTest::CreateNodes ()
-{ 
-  /*
-   * Create m_ySize*m_xSize stations to form a grid topology
-   */
-  nodes.Create (m_xSize * m_ySize);
-  // Configure YansWifiChannel
-  YansWifiPhyHelper wifiPhy = YansWifiPhyHelper::Default ();
-  YansWifiChannelHelper wifiChannel = YansWifiChannelHelper::Default ();
+
+  
+
+  NodeContainer nodes;
+  nodes.Create (n_nodes);
+  MeshHelper mesh;
+
+  NetDeviceContainer meshDevices;/////////
+  Ipv4InterfaceContainer interfaces;//////////
+
+  YansWifiPhyHelper wifiPhy =  YansWifiPhyHelper::Default ();
+  wifiPhy.Set ("RxGain", DoubleValue (0) );
+  YansWifiChannelHelper wifiChannel;
+  wifiChannel.SetPropagationDelay ("ns3::ConstantSpeedPropagationDelayModel");
+  wifiChannel.AddPropagationLoss ("ns3::FixedRssLossModel","Rss",DoubleValue (rss));
   wifiPhy.SetChannel (wifiChannel.Create ());
-  /*
-   * Create mesh helper and set stack installer to it
-   * Stack installer creates all needed protocols and install them to
-   * mesh point device
-   */
+
+ 
   mesh = MeshHelper::Default ();
   if (!Mac48Address (m_root.c_str ()).IsBroadcast ())
     {
@@ -201,175 +219,83 @@ MeshTest::CreateNodes ()
   mesh.SetNumberOfInterfaces (m_nIfaces);
   // Install protocols and return container if MeshPointDevices
   meshDevices = mesh.Install (wifiPhy, nodes);
-  // Setup mobility - static grid topology
-  MobilityHelper mobility;
-  mobility.SetPositionAllocator ("ns3::GridPositionAllocator",
-                                 "MinX", DoubleValue (0.0),
-                                 "MinY", DoubleValue (0.0),
-                                 "DeltaX", DoubleValue (m_step),
-                                 "DeltaY", DoubleValue (m_step),
-                                 "GridWidth", UintegerValue (m_xSize),
-                                 "LayoutType", StringValue ("RowFirst"));
-  mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
-  //mobility.SetMobilityModel ("ns3::RandomWalk2dMobilityModel", "Bounds", RectangleValue (Rectangle (0, 100, 0, 100)));
 
 
+  MobilityHelper mobilityAdhoc;
+  ObjectFactory pos;
+  pos.SetTypeId ("ns3::RandomRectanglePositionAllocator");
+  pos.Set ("X", StringValue ("ns3::UniformRandomVariable[Min=0.0|Max=500.0]"));
+  pos.Set ("Y", StringValue ("ns3::UniformRandomVariable[Min=0.0|Max=500.0]"));
+  Ptr<PositionAllocator> taPositionAlloc = pos.Create ()->GetObject<PositionAllocator> ();
+  mobilityAdhoc.SetMobilityModel ("ns3::RandomWaypointMobilityModel",
+                                  "PositionAllocator", PointerValue (taPositionAlloc));
+  mobilityAdhoc.SetPositionAllocator (taPositionAlloc);
+  mobilityAdhoc.Install (nodes);
 
-  mobility.Install (nodes);
-  if (m_pcap)
-    wifiPhy.EnablePcapAll (std::string ("mp-"));
-}
-
-  
-void
-MeshTest::InstallInternetStack ()
-{
   InternetStackHelper internetStack;
   internetStack.Install (nodes);
   Ipv4AddressHelper address;
+  NS_LOG_INFO ("Assign IP Addresses.");
   address.SetBase ("10.1.1.0", "255.255.255.0");
-  interfaces = address.Assign (meshDevices);
-}
-void
-MeshTest::InstallApplication ()
-{
-  UdpEchoServerHelper echoServer (9);
-  ApplicationContainer serverApps = echoServer.Install (nodes.Get (0));
-  serverApps.Start (Seconds (0.0));
-  serverApps.Stop (Seconds (m_totalTime));
+  interfaces = address.Assign (meshDevices); 
+
+  TypeId tid = TypeId::LookupByName ("ns3::UdpSocketFactory");
+
+  OnOffHelper onoff1 ("ns3::UdpSocketFactory",Address ());
+  onoff1.SetAttribute ("OnTime", StringValue ("ns3::ConstantRandomVariable[Constant=1.0]"));
+  onoff1.SetAttribute ("OffTime", StringValue ("ns3::ConstantRandomVariable[Constant=0.01]"));
+  onoff1.SetAttribute("DataRate", StringValue ("54Mbps"));
+ 
+  
+  Ptr<Socket> recvSink;
+  Ptr<Socket> source;
+
+  
+    recvSink = Socket::CreateSocket (nodes.Get (9), tid);
+    InetSocketAddress local = InetSocketAddress (Ipv4Address::GetAny (), 80);
+    recvSink->Bind (local);
+    recvSink->SetRecvCallback (MakeCallback (&ReceivePacket));
+  
+    source = Socket::CreateSocket (nodes.Get (0), tid);
+    InetSocketAddress remote = InetSocketAddress (Ipv4Address ("255.255.255.255"), 80);
+    source->SetAllowBroadcast (true);
+    source->Connect (remote);
+
+   ApplicationContainer clientApps = onoff1.Install (nodes.Get (0));
+   clientApps.Start (Seconds (0.0));
+   clientApps.Stop (Seconds (10.0));
+
+   NS_LOG_UNCOND ("Testing " << numPackets  << " packets sent with receiver rss " << rss );
 
 
-  UdpEchoClientHelper echoClient (interfaces.GetAddress (0), 9);
-  echoClient.SetAttribute ("MaxPackets", UintegerValue ((uint32_t) (m_totalTime*(1/m_packetInterval))));
-  echoClient.SetAttribute ("Interval", TimeValue (Seconds (m_packetInterval)));
-  std::cout<<"Interval is: "<< m_packetInterval << " seconds" << std::endl;
-  echoClient.SetAttribute ("PacketSize", UintegerValue (m_packetSize));
-  std::cout<<"There are  "<< (m_xSize * m_ySize) << " in the network." << std::endl;
-  ApplicationContainer clientApps = echoClient.Install (nodes.Get (m_xSize * m_ySize-1));
-  clientApps.Start (Seconds (0.0));
-  clientApps.Stop (Seconds (m_totalTime));
-}
+
+if (numPackets>0){
+
+//  Ptr<ExponentialRandomVariable> x = CreateObject<ExponentialRandomVariable> ();
+//     x->SetAttribute ("Mean", DoubleValue (mean));
+//     x->SetAttribute ("Bound", DoubleValue (bound));
+//     uint16_t packet = (unsigned int) x->GetValue ();
+//     interval = 1./packet;
+//     std::cout<<"It is a Poisson arrival, "<< packet << " packets are sent per seconds" << std::endl;
+     uint16_t packet =(unsigned int) 1./interval;
+     std::cout<<"Interval is: "<< interval << std::endl;
+     Time interPacketInterval = Seconds (interval);
+    
+     Simulator::ScheduleWithContext (source->GetNode ()->GetId (),
+                                  interPacketInterval, &GenerateTraffic, 
+                                  source, packetSize, numPackets, interPacketInterval);
+
+     numPackets = numPackets - packet;
+
+  }//if
+
+  
 
 
-int
-MeshTest::Run ()
-{
-  CreateNodes ();
-  InstallInternetStack ();
-  InstallApplication ();
-  Simulator::Schedule (Seconds (m_totalTime), &MeshTest::Report, this);
-  Simulator::Stop (Seconds (m_totalTime));
-
-
-  AnimationInterface anim("mesh.xml");
-
-  anim.SetMaxPktsPerTraceFile((uint64_t) (1000000000*m_xSize*m_ySize*m_totalTime/m_packetInterval));
-  //---------------------------------------------------------------
-  for (uint32_t i=0; i< nodes.GetN(); ++i)
-     {
-        anim.UpdateNodeDescription (nodes.Get (i), "");
-        anim.UpdateNodeColor (nodes.Get(i), 0, 250, 0);   
-     }
-  anim.EnableIpv4RouteTracking ("meshtrace.xml", Seconds(0), Seconds(5), Seconds(0.25));
-  anim.EnableWifiMacCounters(Seconds(0), Seconds(10));
-  anim.EnableWifiPhyCounters(Seconds(0), Seconds(10));
-
-  //Flow Monitor
-  FlowMonitorHelper flowmon;
-  Ptr<FlowMonitor> monitor = flowmon.InstallAll();
-  Simulator::Stop (Seconds (m_totalTime));
 
   Simulator::Run ();
-
-
-  monitor->CheckForLostPackets ();
-  Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier> (flowmon.GetClassifier());
-  std::map<FlowId, FlowMonitor::FlowStats> stats = monitor->GetFlowStats ();
-
-      uint32_t txPacketsum = 15;
-      uint32_t rxPacketsum = 10;
-      uint32_t DropPacketsum = 10;
-      uint32_t LostPacketsum = 10;
-      uint32_t rxBytessum = 15;
-      uint32_t Delaysum = 0;
-
-  std::ofstream ofs ("ResultGragh.plf", std::ofstream::out);
-
-
-  for(std::map<FlowId, FlowMonitor::FlowStats>::const_iterator iter = stats.begin (); iter != stats.end(); ++iter)
-
-     {
-         txPacketsum += iter->second.txPackets;
-         rxPacketsum += iter->second.rxPackets;
-         DropPacketsum += iter->second.packetsDropped.size();
-         LostPacketsum += iter->second.lostPackets;
-         Delaysum += iter->second.delaySum.GetSeconds();
-         rxBytessum += iter->second.rxBytes;
-
-         NS_LOG_UNCOND("Throughput: " <<iter->second.rxBytes * 8.0/(iter->second.timeLastRxPacket.GetSeconds()-iter->second.timeFirstTxPacket.GetSeconds())/ 1024 << "mbps");
-         NS_LOG_UNCOND("Tx Packets: " <<iter ->second.txPackets);
-         NS_LOG_UNCOND("Rx Packets: " <<iter ->second.rxPackets);
-         NS_LOG_UNCOND("Delay: " <<iter ->second.delaySum.GetSeconds());
-
-         monitor->SerializeToXmlFile("lablab.flowmon1.xml", true, true);
-     }
-
-       NS_LOG_UNCOND("Average PDR: " <<((rxPacketsum * 100)/ txPacketsum) << " ");
-       NS_LOG_UNCOND("Average jitter: " << ((LostPacketsum * 100)/ txPacketsum) << " ");
-       NS_LOG_UNCOND("Average Throughput: " << ((rxBytessum * 8.0) / (m_totalTime)) / 1024 / 4 << "mbps");
-       NS_LOG_UNCOND("Average Delay: " << (Delaysum / rxPacketsum) * 1000 << "ms" << "\n");
-
-
-       ofs << "set terminal png" << std::endl;
-       ofs << "set output ResultGraph.png" << std::endl;
-       ofs << "set title" << std::endl;
-       ofs << "set xlabel nodes" << std::endl;
-       ofs << "set ylabel value" << std::endl;
-       ofs << "plot" << "'-'" << "title" << "'packet_inter_arrival_time(ms)' with linespoints, '-' title 'jitter' with lines, '-' title 'Throughput' with lines, '-' title 'delay' with lines"<< std::endl;
-       ofs << "1" <<0<< std::endl;
-       ofs << (m_xSize * m_ySize) <<"" << Seconds(m_packetInterval)/(10000*10000) << std::endl;
-       ofs << "e" << std::endl;
-       ofs << "1" <<0 << std::endl;
-       ofs << (m_xSize * m_ySize) <<"" << ((LostPacketsum * 100) / txPacketsum) << std::endl;
-       ofs << "e" << std::endl;
-       ofs << (m_xSize * m_ySize) <<"" << ((rxBytessum * 8.0) / (m_totalTime))/1024/4 << std::endl;
-       ofs << "e" << std::endl;
-       ofs << "1" <<0 << std::endl;
-       ofs << (m_xSize * m_ySize) <<"" << (Delaysum / rxPacketsum)*1000 << std::endl;
-       ofs << "e" << std::endl;
-       ofs.close();
-
-     //--------------------------------------------------------------------
-
   Simulator::Destroy ();
+
   return 0;
 }
 
-
-void
-MeshTest::Report ()
-{
-  unsigned n (0);
-  for (NetDeviceContainer::Iterator i = meshDevices.Begin (); i != meshDevices.End (); ++i, ++n)
-    {
-      std::ostringstream os;
-      os << "mp-report-" << n << ".xml";
-      std::cerr << "Printing mesh point device #" << n << " diagnostics to " << os.str () << "\n";
-      std::ofstream of;
-      of.open (os.str ().c_str ());
-      if (!of.is_open ())
-        {
-          std::cerr << "Error: Can't open file " << os.str () << "\n";
-          return;
-        }
-      mesh.Report (*i, of);
-      of.close ();
-    }
-}
-int
-main (int argc, char *argv[])
-{
-  MeshTest t; 
-  t.Configure (argc, argv);
-  return t.Run ();
-}
