@@ -9,5 +9,5 @@ can get the animation, but the traffic generator can only generate Cbr.
 
 
 In wifimesh2.cc
-Now the code can work, however the simulation result seems not normal.
-There is a big decrease of throught between arrival rate (constant random value) 20 packets/s and 30 packets/s. 
+Now the code can work, however the simulation result seems ok.
+Need to add poisson process of packet size. 
