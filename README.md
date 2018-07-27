@@ -11,3 +11,8 @@ can get the animation, but the traffic generator can only generate Cbr.
 In wifimesh2.cc
 Now the code can work, however the simulation result seems ok.
 Need to add poisson process of packet size. 
+
+
+In wifimesh3.cc
+Now the code can generate poisson traffic, the packet size follows poisson distribution with mean=1024 bytes.
+We can increase the load by increasing the number of packet arriving per second with “”
