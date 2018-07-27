@@ -17,39 +17,6 @@
  *
  */
 
-// 
-// This script configures two nodes on an 802.11b physical layer, with
-// 802.11b NICs in adhoc mode, and by default, sends one packet of 1000 
-// (application) bytes to the other node.  The physical layer is configured
-// to receive at a fixed RSS (regardless of the distance and transmit
-// power); therefore, changing position of the nodes has no effect. 
-//
-// There are a number of command-line options available to control
-// the default behavior.  The list of available command-line options
-// can be listed with the following command:
-// ./waf --run "wifi-simple-adhoc --help"
-//
-// For instance, for this configuration, the physical layer will
-// stop successfully receiving packets when rss drops below -97 dBm.
-// To see this effect, try running:
-//
-// ./waf --run "wifi-simple-adhoc --rss=-97 --numPackets=20"
-// ./waf --run "wifi-simple-adhoc --rss=-98 --numPackets=20"
-// ./waf --run "wifi-simple-adhoc --rss=-99 --numPackets=20"
-//
-// Note that all ns-3 attributes (not just the ones exposed in the below
-// script) can be changed at command line; see the documentation.
-//
-// This script can also be helpful to put the Wifi layer into verbose
-// logging mode; this command will turn on all wifi logging:
-// 
-// ./waf --run "wifi-simple-adhoc --verbose=1"
-//
-// When you are done, you will notice two pcap trace files in your directory.
-// If you have tcpdump installed, you can try this:
-//
-// tcpdump -r wifi-simple-adhoc-0-0.pcap -nn -tt
-//
 
 #include "ns3/core-module.h"
 #include "ns3/network-module.h"
@@ -80,13 +47,13 @@ struct txrec {
   uint64_t pktUid;
 };
 
-
-
 std::vector<txrec> tx_list;
-
 uint32_t m_recvBytes=0;
 Time totalDelay;
 uint32_t throughput;
+uint16_t numrecv=0;
+Time FirstTx ;
+
 
 void ReceivePacket (Ptr<Socket> socket)
 {
@@ -95,32 +62,37 @@ void ReceivePacket (Ptr<Socket> socket)
   while ((pk = socket->Recv ()))
     {
       
-      NS_LOG_UNCOND ("Received one packet!");      
+      //NS_LOG_UNCOND ("Received one packet!");      
       m_recvBytes += pk->GetSize();
       std::cout<< m_recvBytes << " bytes received." << std::endl;
       pk_uid = pk->GetUid();
-      std::cout<< "The uid is: "<< pk_uid << std::endl;
+      //std::cout<< "The uid is: "<< pk_uid << std::endl;
     }
 
-   Time latency;
-   Time FirstTx;
+   Time latency;   
    Time LastTx;
-
+   
    for(uint16_t i = 0; i < tx_list.size(); i++ ) {
      if(tx_list.at(i).pktUid==pk_uid) { 
           latency =  Simulator::Now()-tx_list.at(i).sts;           
-          std::cout<<"The packet:"<< pk_uid << " latency is "<< 
-          latency.GetMicroSeconds() <<" us." <<std::endl;
+          //std::cout<<"The packet:"<< pk_uid << " latency is "<< latency.GetMicroSeconds() <<" us." <<std::endl;
           totalDelay += latency;
-          std::cout<<"Total delay is "<< totalDelay.GetMicroSeconds()<<" us."  <<std::endl;
-          FirstTx = tx_list.at(0).sts;
-          LastTx = tx_list.at(tx_list.size()-1).sts;
-          tx_list.erase(tx_list.begin()+i);
+          //std::cout<<"Total delay is "<< totalDelay.GetMicroSeconds()<<" us."  <<std::endl; 
+          FirstTx= tx_list.at(0).sts;         
+          LastTx = tx_list.at(i).sts;
+          //std::cout<<"First tx time is "<< FirstTx.GetMicroSeconds() <<" us."  <<std::endl;
+          //std::cout<<"Last tx time is "<< LastTx.GetMicroSeconds()<<" us."  <<std::endl;
+
+          numrecv++;
+          std::cout<< numrecv <<" packets have been received." <<std::endl;
+          //tx_list.erase(tx_list.begin()+i);
           break;
       }
     }//for
-   std::cout<<"Average delay is "<< (totalDelay.GetMicroSeconds()/100) <<" us."  <<std::endl;
-   Time LastRx = LastTx + latency;
+   std::cout<<"Total delay is "<< totalDelay.GetMicroSeconds()<<" us."  <<std::endl;
+   std::cout<<"Average delay is "<< (totalDelay.GetMicroSeconds()/numrecv) <<" us."  <<std::endl;
+   Time LastRx = LastTx + latency; 
+   std::cout<<"Total simulation time is "<< (LastRx.GetMicroSeconds() - FirstTx.GetMicroSeconds()) <<" us."  <<std::endl;
    throughput =  m_recvBytes * 8.0*1000000/( (LastRx.GetMicroSeconds() - FirstTx.GetMicroSeconds())*1024);
    std::cout<<"Throughput is "<< throughput <<" Kbps."  <<std::endl;
 }
@@ -143,12 +115,21 @@ static void GenerateTraffic (Ptr<Socket> socket, uint32_t pktSize,
       socket->Close ();
     }
   
-
 }
 
-
-
-
+uint32_t PacketSize()
+{
+  
+  double     mean = 1024;
+  double     bound = 0.0; 
+  Ptr<ExponentialRandomVariable> x = CreateObject<ExponentialRandomVariable> ();
+     x->SetAttribute ("Mean", DoubleValue (mean));
+     x->SetAttribute ("Bound", DoubleValue (bound));
+     uint32_t packetSize = (unsigned int) x->GetValue ();
+     std::cout<<"It is a Poisson arrival packet size is "<< packetSize << " bytes" << std::endl;
+  
+  return  packetSize;
+}
 
 
 
@@ -157,13 +138,12 @@ int main (int argc, char *argv[])
   
   std::string phyMode ("DsssRate1Mbps");
   double     rss = -80;  // -dBm
-  uint32_t   packetSize = 1000; // bytes
-  uint32_t   numPackets = 100;
-  double     interval=1; // seconds
+  uint32_t   numPackets = 50;
+  int        arrivalRate = 5;
+  double     interval; // seconds
   uint16_t   n_nodes = 10;
 
-//  double     mean = 10;
-//  double     bound = 0.0;
+
   uint32_t   m_nIfaces =1;
   bool       m_chan = true;
   double     m_randomStart =0.1;
@@ -173,9 +153,8 @@ int main (int argc, char *argv[])
   CommandLine cmd;
   cmd.AddValue ("phyMode", "Wifi Phy mode", phyMode);
   cmd.AddValue ("rss", "received signal strength", rss);
-  cmd.AddValue ("packetSize", "size of application packet sent", packetSize);
   cmd.AddValue ("numPackets", "number of packets generated", numPackets);
-  cmd.AddValue ("interval", "interval (seconds) between packets", interval);
+  cmd.AddValue ("arrivalRate", "arrivalRate each second", arrivalRate);
   cmd.Parse (argc, argv);
 
   
@@ -266,26 +245,21 @@ int main (int argc, char *argv[])
    clientApps.Stop (Seconds (10.0));
 
    NS_LOG_UNCOND ("Testing " << numPackets  << " packets sent with receiver rss " << rss );
-
+   
+    interval = 1./arrivalRate;
+     std::cout<<"Interval is: "<< interval << " s."<< std::endl;
+     Time interPacketInterval = Seconds (interval);
 
 
 if (numPackets>0){
 
-//  Ptr<ExponentialRandomVariable> x = CreateObject<ExponentialRandomVariable> ();
-//     x->SetAttribute ("Mean", DoubleValue (mean));
-//     x->SetAttribute ("Bound", DoubleValue (bound));
-//     uint16_t packet = (unsigned int) x->GetValue ();
-//     interval = 1./packet;
-//     std::cout<<"It is a Poisson arrival, "<< packet << " packets are sent per seconds" << std::endl;
-     uint16_t packet =(unsigned int) 1./interval;
-     std::cout<<"Interval is: "<< interval << std::endl;
-     Time interPacketInterval = Seconds (interval);
-    
      Simulator::ScheduleWithContext (source->GetNode ()->GetId (),
                                   interPacketInterval, &GenerateTraffic, 
-                                  source, packetSize, numPackets, interPacketInterval);
+                                  source, PacketSize(), numPackets, interPacketInterval);
 
-     numPackets = numPackets - packet;
+     numPackets = numPackets - arrivalRate;
+
+   
 
   }//if
 
@@ -298,5 +272,4 @@ if (numPackets>0){
 
   return 0;
 }
-
 
