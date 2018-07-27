@@ -167,7 +167,7 @@ int main (int argc, char *argv[])
   
   std::string phyMode ("DsssRate1Mbps");
   double     rss = -80;  // -dBm
-  uint32_t   numPackets = 50;
+  uint32_t   numPackets = 100;
   int        arrivalRate = 5;
   double     interval; // seconds
   uint16_t   n_nodes = 10;
