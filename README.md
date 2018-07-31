@@ -15,4 +15,12 @@ Need to add poisson process of packet size.
 
 In wifimesh3.cc
 Now the code can generate poisson traffic, the packet size follows poisson distribution with mean=1024 bytes.
-We can increase the load by increasing the number of packet arriving per second with “”
+We can increase the load by increasing the number of packet arriving per second with “cmd line”.
+Results is in Performance.xlsx 
+
+
+In wifimesh4.cc
+Now there are double sources and double sinks. the packet size follows poisson distribution with mean=1024 bytes.
+We can increase the load by increasing the number of packet arriving per second with “cmd line”.
+The animation is included now with 50 seconds. 
+Results is in Performance.xlsx 
