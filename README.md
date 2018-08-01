@@ -24,3 +24,8 @@ Now there are double sources and double sinks. the packet size follows poisson d
 We can increase the load by increasing the number of packet arriving per second with “cmd line”.
 The animation is included now with 50 seconds. 
 Results is in Performance.xlsx 
+
+In wifimesh5.cc
+The packet size is originally 1024 bytes, however we can change it by "cmd line".
+Now the arrival process is poisson process with the average arrival rate 20 packets/s.  We can change it by "cmd line".
+Results is in Performance.xlsx 
