@@ -34,4 +34,6 @@ Results is in Performance.xlsx
 Now i start to build a new mesh network using Zigbee.
 However, it is kind of complicated. Cause the mesh network in NS3 currently mainly support WifiPHY, but not 802.15.4.
 https://www.nsnam.org/wiki/Lr-wpan
+https://groups.google.com/forum/#!topic/ns-3-users/vA-_3yiExy4
+https://groups.google.com/forum/#!searchin/ns-3-users/802.15.4/ns-3-users/kEP0ekpYIe4/GWl8rHz_H78J
 So ineed to figure out other method to compile mesh, 802.15.4 and csma/ca together.
