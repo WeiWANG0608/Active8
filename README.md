@@ -29,3 +29,9 @@ In wifimesh5.cc
 The packet size is originally 1024 bytes, however we can change it by "cmd line".
 Now the arrival process is poisson process with the average arrival rate 20 packets/s.  We can change it by "cmd line".
 Results is in Performance.xlsx 
+
+
+Now i start to build a new mesh network using Zigbee.
+However, it is kind of complicated. Cause the mesh network in NS3 currently mainly support WifiPHY, but not 802.15.4.
+https://www.nsnam.org/wiki/Lr-wpan
+So ineed to figure out other method to compile mesh, 802.15.4 and csma/ca together.
